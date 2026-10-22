@@ -56,9 +56,9 @@
 | **Torch / Flashlight** | *"Turn on the flashlight"*, *"Torch jalao"*, *"Torch off"*, *"Torch band karo"* |
 | **Battery** | *"What is my battery percentage?"*, *"Battery status"*, *"Battery kitni hai"* |
 | **App Launching** | *"Open YouTube"*, *"YouTube kholo"*, *"Open WhatsApp"*, *"Open Chrome"* |
-| **Alarms & Timers** | *"Set an alarm for 6 AM"*, *"Set a timer for 10 minutes"*, *"5 minute ka timer lagao"* |
-| **Phone Calls** | *"Call Rahul"*, *"Call Dad"* |
-| **WhatsApp** | *"Send WhatsApp to Dad saying I am coming home"*, *"WhatsApp Rahul"* |
-| **SMS** | *"Send SMS to Dad saying I am on my way"* |
-| **System Settings** | *"Open Wi-Fi settings"*, *"Open Bluetooth"*, *"Increase volume"* |
+| **YouTube Search & Play** | *"Search YouTube for AI news"*, *"Play relaxing music on YouTube"*, *"Search for Doraemon movies on YouTube"* |
+| **Phone Calls** | *"Call Rahul"*, *"Call Dad"*, *"Find Pravin in my contacts"*, *"Call this number: 9876543210"* |
+| **WhatsApp** | *"Send WhatsApp to Dad saying I am coming home"*, *"WhatsApp Rahul that I am on my way"*, *"Open Mom's WhatsApp chat"* |
+| **SMS** | *"Send an SMS to Dad saying I will be home soon"*, *"Cancel the message"* |
+| **System Settings** | *"Open Wi-Fi settings"*, *"Open Bluetooth"*, *"Increase volume"*, *"Turn on flashlight"* |
 | **AI Questions** | *"Explain artificial intelligence"*, *"Explain this in Hindi"*, *"Who was Nikola Tesla?"* |

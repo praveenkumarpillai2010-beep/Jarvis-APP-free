@@ -29,6 +29,11 @@ data class PendingActionConfirmation(
     val description: String,
     val details: String,
     val actionCategory: String,
+    val editableMessage: String? = null,
+    val onMessageChange: ((String) -> Unit)? = null,
+    val onReadAloud: (() -> Unit)? = null,
+    val multipleContacts: List<ContactModel>? = null,
+    val onSelectContact: ((ContactModel) -> Unit)? = null,
     val onConfirm: () -> Unit,
     val onCancel: () -> Unit
 )
@@ -102,7 +107,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
         _hasMicPermission.value = granted
         if (granted) {
             _systemStatusText.value = "VOICE RECOGNITION ONLINE"
-            // Start listening automatically on startup as requested!
+            // Start listening automatically on startup as requested
             if (voiceEngine.isAutoListening.value) {
                 voiceEngine.startListening()
             }
@@ -149,6 +154,34 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
 
     private suspend fun executeAction(action: ParsedAction, originalInput: String, wasVoice: Boolean) {
         when (action) {
+            is ParsedAction.CancelAction -> {
+                if (_pendingConfirmation.value != null) {
+                    _pendingConfirmation.value?.onCancel?.invoke()
+                } else {
+                    voiceEngine.stopSpeaking()
+                    voiceEngine.stopListening()
+                    recordAndRespond(
+                        category = "CANCEL_ACTION",
+                        command = originalInput,
+                        status = "SUCCESS",
+                        reply = "Action cancelled, sir.",
+                        wasVoice = wasVoice
+                    )
+                }
+            }
+
+            is ParsedAction.SearchYouTube -> {
+                val res = deviceController.searchYouTube(action.query, action.autoPlay)
+                val reply = res.getOrElse { "Could not launch YouTube: ${it.message}" }
+                recordAndRespond(
+                    category = "SEARCH_YOUTUBE",
+                    command = originalInput,
+                    status = if (res.isSuccess) "SUCCESS" else "FAILED",
+                    reply = reply,
+                    wasVoice = wasVoice
+                )
+            }
+
             is ParsedAction.FlashlightOn -> {
                 val res = deviceController.toggleFlashlight(true)
                 val reply = res.getOrElse { "Could not turn on flashlight: ${it.message}" }
@@ -248,6 +281,26 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
 
+            is ParsedAction.FindContact -> {
+                handleFindContact(action.query, originalInput, wasVoice)
+            }
+
+            is ParsedAction.CallContact -> {
+                handleCallAction(action.query, originalInput, wasVoice)
+            }
+
+            is ParsedAction.DraftWhatsApp -> {
+                handleWhatsAppAction(action.recipient, action.message, originalInput, wasVoice)
+            }
+
+            is ParsedAction.DraftSms -> {
+                handleSmsAction(action.recipient, action.message, originalInput, wasVoice)
+            }
+
+            is ParsedAction.ReadNotifications -> {
+                handleReadNotifications(originalInput, wasVoice)
+            }
+
             is ParsedAction.SearchWeb -> {
                 val res = deviceController.searchWeb(action.query)
                 val reply = res.getOrElse { "Web search error: ${it.message}" }
@@ -272,32 +325,34 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
 
-            is ParsedAction.CallContact -> {
-                handleCallAction(action.query, originalInput, wasVoice)
-            }
-
-            is ParsedAction.DraftWhatsApp -> {
-                handleWhatsAppAction(action.recipient, action.message, originalInput, wasVoice)
-            }
-
-            is ParsedAction.DraftSms -> {
-                handleSmsAction(action.recipient, action.message, originalInput, wasVoice)
-            }
-
-            is ParsedAction.ReadNotifications -> {
-                handleReadNotifications(originalInput, wasVoice)
-            }
-
             is ParsedAction.GeneralChat -> {
                 handleGeneralChat(action.query, wasVoice)
             }
         }
     }
 
+    private suspend fun handleFindContact(query: String, originalInput: String, wasVoice: Boolean) {
+        val contacts = deviceController.searchContacts(query)
+        val reply = if (contacts.isEmpty()) {
+            "No contact found for '$query' in your phone contacts."
+        } else if (contacts.size == 1) {
+            "Found ${contacts[0].name}: ${contacts[0].phoneNumber}."
+        } else {
+            "Found ${contacts.size} matching contacts for '$query': " +
+                    contacts.take(3).joinToString(", ") { "${it.name} (${it.phoneNumber})" }
+        }
+        recordAndRespond(
+            category = "FIND_CONTACT",
+            command = originalInput,
+            status = if (contacts.isNotEmpty()) "SUCCESS" else "NOT_FOUND",
+            reply = reply,
+            wasVoice = wasVoice
+        )
+    }
+
     private suspend fun handleCallAction(query: String, originalInput: String, wasVoice: Boolean) {
         val contacts = deviceController.searchContacts(query)
         if (contacts.isEmpty()) {
-            // Direct dial fallback if query is digits
             if (query.matches("[0-9+\\-\\s]+".toRegex())) {
                 showCallConfirmation(query, query, originalInput, wasVoice)
             } else {
@@ -310,9 +365,36 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                     wasVoice = wasVoice
                 )
             }
-        } else {
+        } else if (contacts.size == 1) {
             val contact = contacts.first()
             showCallConfirmation(contact.name, contact.phoneNumber, originalInput, wasVoice)
+        } else {
+            // Multiple contacts found: Disambiguate!
+            _pendingConfirmation.value = PendingActionConfirmation(
+                title = "SELECT CONTACT TO CALL",
+                description = "Found ${contacts.size} contacts matching '$query'. Please select one:",
+                details = contacts.joinToString("\n") { "${it.name}: ${it.phoneNumber}" },
+                actionCategory = "CALL_CONTACT",
+                multipleContacts = contacts,
+                onSelectContact = { chosen ->
+                    _pendingConfirmation.value = null
+                    showCallConfirmation(chosen.name, chosen.phoneNumber, originalInput, wasVoice)
+                },
+                onConfirm = {},
+                onCancel = {
+                    _pendingConfirmation.value = null
+                    viewModelScope.launch {
+                        recordAndRespond(
+                            category = "CANCEL_ACTION",
+                            command = originalInput,
+                            status = "CANCELLED",
+                            reply = "Call cancelled, sir.",
+                            wasVoice = wasVoice
+                        )
+                    }
+                }
+            )
+            voiceEngine.speak("Multiple contacts found for $query. Please choose which person to call.")
         }
     }
 
@@ -354,16 +436,59 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
 
     private suspend fun handleWhatsAppAction(recipient: String, message: String, originalInput: String, wasVoice: Boolean) {
         val contacts = deviceController.searchContacts(recipient)
-        val targetNumber = contacts.firstOrNull()?.phoneNumber ?: recipient
 
+        if (contacts.size > 1) {
+            // Disambiguation
+            _pendingConfirmation.value = PendingActionConfirmation(
+                title = "SELECT WHATSAPP CONTACT",
+                description = "Multiple contacts found for '$recipient'. Select intended person:",
+                details = contacts.joinToString("\n") { "${it.name}: ${it.phoneNumber}" },
+                actionCategory = "DRAFT_WHATSAPP",
+                multipleContacts = contacts,
+                onSelectContact = { chosen ->
+                    _pendingConfirmation.value = null
+                    showWhatsAppDraftDialog(chosen.name, chosen.phoneNumber, message, originalInput, wasVoice)
+                },
+                onConfirm = {},
+                onCancel = {
+                    _pendingConfirmation.value = null
+                    viewModelScope.launch {
+                        recordAndRespond("CANCEL_ACTION", originalInput, "CANCELLED", "WhatsApp message cancelled.", wasVoice)
+                    }
+                }
+            )
+            voiceEngine.speak("Multiple contacts found for $recipient. Please select one.")
+        } else {
+            val contact = contacts.firstOrNull()
+            val finalName = contact?.name ?: recipient
+            val finalNumber = contact?.phoneNumber ?: recipient
+            showWhatsAppDraftDialog(finalName, finalNumber, message, originalInput, wasVoice)
+        }
+    }
+
+    private fun showWhatsAppDraftDialog(
+        name: String,
+        number: String,
+        initialMessage: String,
+        originalInput: String,
+        wasVoice: Boolean
+    ) {
+        var currentMsg = initialMessage
         _pendingConfirmation.value = PendingActionConfirmation(
             title = "CONFIRM WHATSAPP MESSAGE",
-            description = "Recipient: $recipient ($targetNumber)",
-            details = "Message: \"$message\"",
+            description = "Recipient: $name ($number)",
+            details = if (currentMsg.isNotBlank()) "Draft: \"$currentMsg\"" else "Open conversation without prefill",
             actionCategory = "DRAFT_WHATSAPP",
+            editableMessage = currentMsg,
+            onMessageChange = { updated ->
+                currentMsg = updated
+            },
+            onReadAloud = {
+                voiceEngine.speak(if (currentMsg.isNotBlank()) "Message to $name says: $currentMsg" else "No message drafted for $name.")
+            },
             onConfirm = {
                 _pendingConfirmation.value = null
-                val res = deviceController.prepareWhatsApp(targetNumber, message)
+                val res = deviceController.prepareWhatsApp(number, currentMsg)
                 val reply = res.getOrElse { "Failed to launch WhatsApp: ${it.message}" }
                 viewModelScope.launch {
                     recordAndRespond(
@@ -382,27 +507,74 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                         category = "CANCEL_ACTION",
                         command = originalInput,
                         status = "CANCELLED",
-                        reply = "WhatsApp message cancelled.",
+                        reply = "WhatsApp message cancelled, sir.",
                         wasVoice = wasVoice
                     )
                 }
             }
         )
-        voiceEngine.speak("Ready to prepare WhatsApp message to $recipient. Please confirm.")
+        val promptSpeech = if (initialMessage.isNotBlank()) {
+            "Ready to open WhatsApp chat with $name and message: $initialMessage. Please confirm."
+        } else {
+            "Ready to open WhatsApp chat with $name. Please confirm."
+        }
+        voiceEngine.speak(promptSpeech)
     }
 
     private suspend fun handleSmsAction(recipient: String, message: String, originalInput: String, wasVoice: Boolean) {
         val contacts = deviceController.searchContacts(recipient)
-        val targetNumber = contacts.firstOrNull()?.phoneNumber ?: recipient
 
+        if (contacts.size > 1) {
+            _pendingConfirmation.value = PendingActionConfirmation(
+                title = "SELECT SMS CONTACT",
+                description = "Multiple contacts found for '$recipient'. Select intended recipient:",
+                details = contacts.joinToString("\n") { "${it.name}: ${it.phoneNumber}" },
+                actionCategory = "DRAFT_SMS",
+                multipleContacts = contacts,
+                onSelectContact = { chosen ->
+                    _pendingConfirmation.value = null
+                    showSmsDraftDialog(chosen.name, chosen.phoneNumber, message, originalInput, wasVoice)
+                },
+                onConfirm = {},
+                onCancel = {
+                    _pendingConfirmation.value = null
+                    viewModelScope.launch {
+                        recordAndRespond("CANCEL_ACTION", originalInput, "CANCELLED", "SMS cancelled.", wasVoice)
+                    }
+                }
+            )
+            voiceEngine.speak("Multiple contacts found for $recipient. Please select one.")
+        } else {
+            val contact = contacts.firstOrNull()
+            val finalName = contact?.name ?: recipient
+            val finalNumber = contact?.phoneNumber ?: recipient
+            showSmsDraftDialog(finalName, finalNumber, message, originalInput, wasVoice)
+        }
+    }
+
+    private fun showSmsDraftDialog(
+        name: String,
+        number: String,
+        initialMessage: String,
+        originalInput: String,
+        wasVoice: Boolean
+    ) {
+        var currentMsg = initialMessage
         _pendingConfirmation.value = PendingActionConfirmation(
             title = "CONFIRM SMS MESSAGE",
-            description = "Recipient: $recipient ($targetNumber)",
-            details = "Message: \"$message\"",
+            description = "Recipient: $name ($number)",
+            details = if (currentMsg.isNotBlank()) "Draft: \"$currentMsg\"" else "Opening SMS composer",
             actionCategory = "DRAFT_SMS",
+            editableMessage = currentMsg,
+            onMessageChange = { updated ->
+                currentMsg = updated
+            },
+            onReadAloud = {
+                voiceEngine.speak(if (currentMsg.isNotBlank()) "SMS to $name says: $currentMsg" else "No SMS message text drafted.")
+            },
             onConfirm = {
                 _pendingConfirmation.value = null
-                val res = deviceController.prepareSms(targetNumber, message)
+                val res = deviceController.prepareSms(number, currentMsg)
                 val reply = res.getOrElse { "Failed to draft SMS: ${it.message}" }
                 viewModelScope.launch {
                     recordAndRespond(
@@ -427,7 +599,12 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         )
-        voiceEngine.speak("Ready to draft SMS to $recipient. Please confirm.")
+        val promptSpeech = if (initialMessage.isNotBlank()) {
+            "Ready to draft SMS to $name with message: $initialMessage. Please confirm."
+        } else {
+            "Ready to open SMS composer for $name. Please confirm."
+        }
+        voiceEngine.speak(promptSpeech)
     }
 
     private suspend fun handleReadNotifications(originalInput: String, wasVoice: Boolean) {
@@ -452,12 +629,10 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun handleGeneralChat(query: String, wasVoice: Boolean) {
-        // Collect recent turns for context
         val recentChat = chatMessages.value.takeLast(6).map { it.role to it.content }
-
         val result = geminiService.askJarvis(query, recentChat)
         val reply = result.getOrElse { err ->
-            "I heard '$query'. For complex inquiries, please ensure your Gemini API key is configured in AI Studio Secrets. Local phone controls remain fully active."
+            "I heard '$query'. For complex inquiries, please ensure your Gemini API key is configured in AI Studio Secrets. Local phone controls and YouTube search remain fully active."
         }
 
         recordAndRespond(

@@ -195,6 +195,52 @@ class DeviceActionController(private val context: Context) {
         }
     }
 
+    // YouTube Search & Playback
+    fun searchYouTube(query: String, autoPlay: Boolean = false): Result<String> {
+        val cleanQuery = query.trim()
+        val pm = context.packageManager
+        val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
+        val webUri = Uri.parse("https://www.youtube.com/results?search_query=$encoded")
+
+        // 1. Try launching YouTube app with view intent
+        val ytIntent = Intent(Intent.ACTION_VIEW, webUri).apply {
+            setPackage("com.google.android.youtube")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        if (ytIntent.resolveActivity(pm) != null) {
+            context.startActivity(ytIntent)
+            val actionMsg = if (autoPlay) {
+                "Launching YouTube and playing '$cleanQuery', sir."
+            } else {
+                "Searching YouTube for '$cleanQuery', sir."
+            }
+            return Result.success(actionMsg)
+        }
+
+        // 2. Try generic search intent
+        val searchIntent = Intent(Intent.ACTION_SEARCH).apply {
+            setPackage("com.google.android.youtube")
+            putExtra("query", cleanQuery)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (searchIntent.resolveActivity(pm) != null) {
+            context.startActivity(searchIntent)
+            return Result.success("Searching YouTube for '$cleanQuery'.")
+        }
+
+        // 3. Fallback to web browser
+        val browserIntent = Intent(Intent.ACTION_VIEW, webUri).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            context.startActivity(browserIntent)
+            Result.success("Opening YouTube in browser for '$cleanQuery'.")
+        } catch (e: Exception) {
+            Result.failure(Exception("Unable to open YouTube: ${e.message}"))
+        }
+    }
+
     // Set Alarm
     fun setAlarm(hour: Int, minute: Int, label: String = "JARVIS Alarm"): Result<String> {
         val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
@@ -279,11 +325,20 @@ class DeviceActionController(private val context: Context) {
         }
     }
 
-    // Contacts search
+    // Contacts search with relationship aliases (e.g. Dad -> Papa, Father; Mom -> Mother, Mummy)
     fun searchContacts(query: String): List<ContactModel> {
         val list = mutableListOf<ContactModel>()
         if (context.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             return list
+        }
+
+        val cleanQuery = query.trim().lowercase()
+        val searchTerms = when (cleanQuery) {
+            "dad", "father", "papa", "daddy" -> listOf("dad", "father", "papa", "daddy")
+            "mom", "mother", "maa", "mummy" -> listOf("mom", "mother", "maa", "mummy")
+            "brother", "bhai" -> listOf("brother", "bhai")
+            "sister", "didi" -> listOf("sister", "didi")
+            else -> listOf(cleanQuery)
         }
 
         val projection = arrayOf(
@@ -291,31 +346,37 @@ class DeviceActionController(private val context: Context) {
             ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
             ContactsContract.CommonDataKinds.Phone.NUMBER
         )
-        val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
-        val selectionArgs = arrayOf("%$query%")
 
-        try {
-            val cursor = context.contentResolver.query(
-                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                projection,
-                selection,
-                selectionArgs,
-                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
-            )
-            cursor?.use {
-                val idIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
-                val nameIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
-                val numIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+        for (term in searchTerms) {
+            val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
+            val selectionArgs = arrayOf("%$term%")
 
-                while (it.moveToNext()) {
-                    val id = if (idIndex != -1) it.getString(idIndex) else ""
-                    val name = if (nameIndex != -1) it.getString(nameIndex) else "Unknown"
-                    val number = if (numIndex != -1) it.getString(numIndex) else ""
-                    list.add(ContactModel(id, name, number))
+            try {
+                val cursor = context.contentResolver.query(
+                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
+                )
+                cursor?.use {
+                    val idIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
+                    val nameIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                    val numIndex = it.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+
+                    while (it.moveToNext()) {
+                        val id = if (idIndex != -1) it.getString(idIndex) else ""
+                        val name = if (nameIndex != -1) it.getString(nameIndex) else "Unknown"
+                        val number = if (numIndex != -1) it.getString(numIndex) else ""
+                        val model = ContactModel(id, name, number)
+                        if (list.none { existing -> existing.phoneNumber == number || (existing.name.equals(name, ignoreCase = true) && number.isEmpty()) }) {
+                            list.add(model)
+                        }
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e(tag, "Error querying contacts for term '$term'", e)
             }
-        } catch (e: Exception) {
-            Log.e(tag, "Error querying contacts", e)
         }
         return list
     }

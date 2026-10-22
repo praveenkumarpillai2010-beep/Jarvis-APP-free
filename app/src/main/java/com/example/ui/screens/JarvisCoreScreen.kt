@@ -337,16 +337,16 @@ fun JarvisCoreScreen(
             )
 
             val commandChips = listOf(
-                "Open YouTube",
+                "Search YouTube for AI news",
+                "Play relaxing music on YouTube",
                 "Turn on flashlight",
                 "Torch band karo",
-                "Battery status",
-                "Set timer for 5 minutes",
-                "Open WhatsApp",
-                "Open Chrome",
+                "What is my battery percentage?",
                 "Call Dad",
-                "Explain AI",
-                "Open Settings"
+                "WhatsApp Dad that I am coming",
+                "Set timer for 10 minutes",
+                "Open Chrome",
+                "Explain artificial intelligence"
             )
 
             FlowRow(

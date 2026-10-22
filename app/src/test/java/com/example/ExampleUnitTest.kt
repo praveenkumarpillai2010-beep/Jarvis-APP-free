@@ -3,6 +3,7 @@ package com.example
 import com.example.ai.CommandRouter
 import com.example.ai.ParsedAction
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -44,6 +45,49 @@ class ExampleUnitTest {
     }
 
     @Test
+    fun testYouTubeSearchAndPlay() {
+        val yt1 = CommandRouter.parse("search YouTube for the latest AI news")
+        assertTrue(yt1 is ParsedAction.SearchYouTube)
+        val s1 = yt1 as ParsedAction.SearchYouTube
+        assertEquals("the latest AI news", s1.query)
+        assertFalse(s1.autoPlay)
+
+        val yt2 = CommandRouter.parse("play relaxing music on YouTube")
+        assertTrue(yt2 is ParsedAction.SearchYouTube)
+        val s2 = yt2 as ParsedAction.SearchYouTube
+        assertEquals("relaxing music", s2.query)
+        assertTrue(s2.autoPlay)
+
+        val yt3 = CommandRouter.parse("search for Doraemon movies on YouTube")
+        assertTrue(yt3 is ParsedAction.SearchYouTube)
+        val s3 = yt3 as ParsedAction.SearchYouTube
+        assertEquals("Doraemon movies", s3.query)
+    }
+
+    @Test
+    fun testFindContactAndCalls() {
+        val find = CommandRouter.parse("find Pravin in my contacts")
+        assertTrue(find is ParsedAction.FindContact)
+        assertEquals("Pravin", (find as ParsedAction.FindContact).query)
+
+        val call = CommandRouter.parse("call Dad")
+        assertTrue(call is ParsedAction.CallContact)
+        assertEquals("Dad", (call as ParsedAction.CallContact).query)
+    }
+
+    @Test
+    fun testMessagingAndCancellation() {
+        val wa = CommandRouter.parse("send whatsapp to Dad saying I am coming home")
+        assertTrue(wa is ParsedAction.DraftWhatsApp)
+        val waAction = wa as ParsedAction.DraftWhatsApp
+        assertEquals("Dad", waAction.recipient)
+        assertEquals("I am coming home", waAction.message)
+
+        val cancel = CommandRouter.parse("cancel the message")
+        assertTrue(cancel is ParsedAction.CancelAction)
+    }
+
+    @Test
     fun testTimerAndAlarm_Commands() {
         val timer = CommandRouter.parse("set a timer for 10 minutes")
         assertTrue(timer is ParsedAction.CreateTimer)
@@ -53,18 +97,5 @@ class ExampleUnitTest {
         assertTrue(alarm is ParsedAction.CreateAlarm)
         assertEquals(6, (alarm as ParsedAction.CreateAlarm).hour)
         assertEquals(30, (alarm as ParsedAction.CreateAlarm).minute)
-    }
-
-    @Test
-    fun testMessagingAndCalls() {
-        val call = CommandRouter.parse("call Rahul")
-        assertTrue(call is ParsedAction.CallContact)
-        assertEquals("Rahul", (call as ParsedAction.CallContact).query)
-
-        val wa = CommandRouter.parse("send whatsapp to Dad saying I am coming home")
-        assertTrue(wa is ParsedAction.DraftWhatsApp)
-        val waAction = wa as ParsedAction.DraftWhatsApp
-        assertEquals("Dad", waAction.recipient)
-        assertEquals("I am coming home", waAction.message)
     }
 }

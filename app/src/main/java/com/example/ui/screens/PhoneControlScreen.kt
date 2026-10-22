@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeUp
@@ -260,9 +261,139 @@ fun PhoneControlScreen(
             }
         }
 
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // 3. YouTube Media Search & Playback Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(JarvisDeepNavy, RoundedCornerShape(12.dp))
+                .border(1.dp, Color(0xFFFF0000).copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                .padding(14.dp)
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF0000)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "YouTube",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "YOUTUBE SEARCH & PLAY",
+                            color = Color(0xFFFF4E4E),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Text(
+                        text = "DIRECT INTENT",
+                        color = JarvisTextMuted,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                var ytQuery by remember { mutableStateOf("") }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = ytQuery,
+                        onValueChange = { ytQuery = it },
+                        placeholder = {
+                            Text("Search video, song, creator or movie...", color = JarvisTextMuted, fontSize = 12.sp)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("youtube_search_input"),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFFFF4E4E),
+                            unfocusedBorderColor = JarvisBorder,
+                            focusedTextColor = JarvisTextPrimary,
+                            unfocusedTextColor = JarvisTextPrimary,
+                            focusedContainerColor = JarvisSurface,
+                            unfocusedContainerColor = JarvisSurface
+                        ),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    Button(
+                        onClick = {
+                            if (ytQuery.isNotBlank()) {
+                                viewModel.deviceController.searchYouTube(ytQuery, autoPlay = true)
+                                ytQuery = ""
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFF0000),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("PLAY", fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        "AI News" to "latest AI news",
+                        "Relaxing Music" to "relaxing music",
+                        "Android Tutorials" to "Android Studio tutorials"
+                    ).forEach { (label, q) ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(JarvisSurface, RoundedCornerShape(6.dp))
+                                .border(1.dp, JarvisBorder, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    viewModel.processUserCommand("Search YouTube for $q", wasVoice = false)
+                                }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                color = JarvisTextSecondary,
+                                fontSize = 10.sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(18.dp))
 
-        // 3. Timers & Alarms Quick Dispatch
+        // 4. Timers & Alarms Quick Dispatch
         Text(
             text = "ALARM & TIMER DISPATCH",
             color = JarvisCyan,
