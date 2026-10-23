@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User preferences and JARVIS assistant configuration",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Authenticated user identifier" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "voiceProfile": { "type": "string", "enum": ["FEMALE", "CINEMATIC"], "description": "Selected voice synthesis profile" },
+        "wakeWordEnabled": { "type": "boolean", "description": "Whether screen wake-up on voice is enabled" },
+        "autoListen": { "type": "boolean", "description": "Continuous silent listening toggle" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Document creation timestamp via FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Document modification timestamp via FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "voiceProfile", "wakeWordEnabled", "autoListen", "createdAt"]
+    },
+    "CommandRecord": {
+      "title": "CommandRecord",
+      "description": "Log of parsed and executed voice commands",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "User who initiated the command" },
+        "commandText": { "type": "string", "description": "Raw recognized speech or text input" },
+        "actionCategory": { "type": "string", "description": "Matched action identifier" },
+        "status": { "type": "string", "description": "Execution status" },
+        "resultMessage": { "type": "string", "description": "Spoken/displayed outcome message" },
+        "wasVoiceTriggered": { "type": "boolean", "description": "Whether input was received via speech recognition" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when command was processed" }
+      },
+      "required": ["userId", "commandText", "actionCategory", "status", "resultMessage", "wasVoiceTriggered", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Conversational exchange between user and JARVIS AI brain",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "User identifier" },
+        "role": { "type": "string", "enum": ["USER", "JARVIS"], "description": "Message author" },
+        "content": { "type": "string", "description": "Dialogue content" },
+        "actionCategory": { "type": "string", "description": "Optional category tag" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp when message was stored" }
+      },
+      "required": ["userId", "role", "content", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile and preferences"
+    },
+    "/users/{userId}/commands/{commandId}": {
+      "schema": "CommandRecord",
+      "description": "User command execution history"
+    },
+    "/users/{userId}/chats/{chatId}": {
+      "schema": "ChatMessage",
+      "description": "User conversational chat logs"
+    }
+  }
+}

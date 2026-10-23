@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (data.voiceProfile in ['FEMALE', 'CINEMATIC']) &&
+             data.wakeWordEnabled is bool &&
+             data.autoListen is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             (!('updatedAt' in data) || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidCommandRecord(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.commandText is string && data.commandText.size() <= 1000 &&
+             data.actionCategory is string && data.actionCategory.size() <= 100 &&
+             data.status is string && data.status.size() <= 50 &&
+             data.resultMessage is string && data.resultMessage.size() <= 2000 &&
+             data.wasVoiceTriggered is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidChatMessage(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             (data.role in ['USER', 'JARVIS']) &&
+             data.content is string && data.content.size() <= 5000 &&
+             (!('actionCategory' in data) || (data.actionCategory is string && data.actionCategory.size() <= 100)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    match /users/{userId} {
+      allow get, list: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.keys().hasAll(['userId', 'voiceProfile', 'wakeWordEnabled', 'autoListen', 'createdAt']) &&
+                       request.resource.data.keys().hasOnly(['userId', 'displayName', 'voiceProfile', 'wakeWordEnabled', 'autoListen', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(request.resource.data);
+
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       request.resource.data.userId == resource.data.userId &&
+                       request.resource.data.createdAt == resource.data.createdAt &&
+                       isValidUserProfile(request.resource.data) &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'voiceProfile', 'wakeWordEnabled', 'autoListen', 'updatedAt']);
+
+      allow delete: if isOwner(userId);
+
+      match /commands/{commandId} {
+        allow get, list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(commandId) &&
+                         request.resource.data.userId == request.auth.uid &&
+                         request.resource.data.keys().hasAll(['userId', 'commandText', 'actionCategory', 'status', 'resultMessage', 'wasVoiceTriggered', 'createdAt']) &&
+                         request.resource.data.keys().hasOnly(['userId', 'commandText', 'actionCategory', 'status', 'resultMessage', 'wasVoiceTriggered', 'createdAt']) &&
+                         isValidCommandRecord(request.resource.data);
+
+        allow delete: if isOwner(userId);
+      }
+
+      match /chats/{chatId} {
+        allow get, list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(chatId) &&
+                         request.resource.data.userId == request.auth.uid &&
+                         request.resource.data.keys().hasAll(['userId', 'role', 'content', 'createdAt']) &&
+                         request.resource.data.keys().hasOnly(['userId', 'role', 'content', 'actionCategory', 'createdAt']) &&
+                         isValidChatMessage(request.resource.data);
+
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

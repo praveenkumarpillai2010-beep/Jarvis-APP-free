@@ -278,6 +278,50 @@ fun SettingsAndPermissionsScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Voice Profile Selector (Female vs Cinematic)
+                val voiceProfile by viewModel.voiceProfileFlow.collectAsState()
+                val wakeScreenEnabled by viewModel.wakeScreenEnabledFlow.collectAsState()
+                val foregroundServiceEnabled by viewModel.foregroundServiceEnabledFlow.collectAsState()
+
+                Text("Voice Personality Profile", color = JarvisTextSecondary, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val profiles = listOf("FEMALE" to "Natural Female (Default)", "CINEMATIC" to "Futuristic Deep")
+                    profiles.forEach { (prof, label) ->
+                        val isSelected = voiceProfile == prof
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(
+                                    if (isSelected) JarvisCyan.copy(alpha = 0.25f) else JarvisSurface,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) JarvisCyan else JarvisBorder,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { viewModel.setVoiceProfile(prof) }
+                                .padding(vertical = 10.dp, horizontal = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSelected) JarvisCyan else JarvisTextSecondary,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
                 // Speech Speed Slider
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -305,7 +349,7 @@ fun SettingsAndPermissionsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Voice Pitch (Cinematic Tone)", color = JarvisTextSecondary, fontSize = 12.sp)
+                    Text("Voice Pitch", color = JarvisTextSecondary, fontSize = 12.sp)
                     Text("${String.format("%.2f", speechPitch)}x", color = JarvisCyan, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                 }
                 Slider(
@@ -335,6 +379,125 @@ fun SettingsAndPermissionsScreen(
                     Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Test Voice", tint = JarvisCyan, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("TEST VOICE SYNTHESIS", color = JarvisCyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 3. Screen Wake-Up & Lock Screen Security Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(JarvisDeepNavy, RoundedCornerShape(12.dp))
+                .border(1.dp, JarvisBorder, RoundedCornerShape(12.dp))
+                .padding(14.dp)
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Security,
+                        contentDescription = "Lock Screen Wake",
+                        tint = JarvisCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "PHONE WAKE-UP & LOCK SCREEN HANDLING",
+                        color = JarvisTextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Wake Screen on Voice Toggle
+                val wakeScreenEnabled by viewModel.wakeScreenEnabledFlow.collectAsState()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.setWakeScreenEnabled(!wakeScreenEnabled) }
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Wake Display on Speech", color = JarvisTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Turns on the screen via Android PowerManager when voice command is received.", color = JarvisTextMuted, fontSize = 10.sp)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .background(if (wakeScreenEnabled) JarvisSuccess.copy(alpha = 0.2f) else JarvisSurface, RoundedCornerShape(6.dp))
+                            .border(1.dp, if (wakeScreenEnabled) JarvisSuccess else JarvisBorder, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (wakeScreenEnabled) "ACTIVE" else "DISABLED",
+                            color = if (wakeScreenEnabled) JarvisSuccess else JarvisTextMuted,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Foreground Background Listening Toggle
+                val foregroundServiceEnabled by viewModel.foregroundServiceEnabledFlow.collectAsState()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.setForegroundServiceEnabled(!foregroundServiceEnabled) }
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Keep Active in Background", color = JarvisTextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Runs approved Android foreground service with persistent status notification.", color = JarvisTextMuted, fontSize = 10.sp)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .background(if (foregroundServiceEnabled) JarvisCyan.copy(alpha = 0.2f) else JarvisSurface, RoundedCornerShape(6.dp))
+                            .border(1.dp, if (foregroundServiceEnabled) JarvisCyan else JarvisBorder, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (foregroundServiceEnabled) "RUNNING" else "STOPPED",
+                            color = if (foregroundServiceEnabled) JarvisCyan else JarvisTextMuted,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Transparent Security & Hardware Boundaries Note
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(JarvisSurface.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                        .padding(10.dp)
+                ) {
+                    Column {
+                        Text(
+                            text = "SECURITY & HARDWARE BOUNDARIES",
+                            color = JarvisCyan,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "• Lock Screen: When locked, Android displays your normal secure lock screen (PIN, password, pattern, or biometric authentication). JARVIS never bypasses device security.\n• Power State: Android applications cannot power on a device that is completely turned off.\n• Silent Listening: Microphone activates and restarts silently without beeps.",
+                            color = JarvisTextSecondary,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp
+                        )
+                    }
                 }
             }
         }

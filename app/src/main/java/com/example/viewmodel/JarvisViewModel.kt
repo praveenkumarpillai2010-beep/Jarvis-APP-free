@@ -23,6 +23,27 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.example.service.JarvisVoiceForegroundService
+
+sealed class WhatsAppDraftState {
+    data object Idle : WhatsAppDraftState()
+    data class DisambiguatingContact(
+        val candidateContacts: List<ContactModel>,
+        val pendingMessage: String?,
+        val originalInput: String
+    ) : WhatsAppDraftState()
+    data class AwaitingMessage(
+        val recipientName: String,
+        val recipientNumber: String,
+        val originalInput: String
+    ) : WhatsAppDraftState()
+    data class AwaitingConfirmation(
+        val recipientName: String,
+        val recipientNumber: String,
+        val message: String,
+        val originalInput: String
+    ) : WhatsAppDraftState()
+}
 
 data class PendingActionConfirmation(
     val title: String,
@@ -63,8 +84,15 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     var currentWindow: android.view.Window? = null
         private set
 
+    var currentActivity: androidx.activity.ComponentActivity? = null
+        private set
+
     fun attachWindow(window: android.view.Window?) {
         currentWindow = window
+    }
+
+    fun attachActivity(activity: androidx.activity.ComponentActivity?) {
+        currentActivity = activity
     }
 
     // Gemini API settings flows
@@ -72,6 +100,15 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     val selectedModelFlow: StateFlow<String> = preferencesManager.selectedModelFlow
     val connectionStatusFlow: StateFlow<com.example.data.GeminiConnectionStatus> = preferencesManager.connectionStatusFlow
     val lastErrorMessageFlow: StateFlow<String> = preferencesManager.lastErrorMessageFlow
+
+    // Voice & System Wake preferences flows
+    val voiceProfileFlow: StateFlow<String> = preferencesManager.voiceProfileFlow
+    val wakeScreenEnabledFlow: StateFlow<Boolean> = preferencesManager.wakeScreenEnabledFlow
+    val foregroundServiceEnabledFlow: StateFlow<Boolean> = preferencesManager.foregroundServiceEnabledFlow
+
+    // WhatsApp Multi-Turn conversation state
+    private val _whatsAppDraftState = MutableStateFlow<WhatsAppDraftState>(WhatsAppDraftState.Idle)
+    val whatsAppDraftState: StateFlow<WhatsAppDraftState> = _whatsAppDraftState.asStateFlow()
 
     private val _isTestingConnection = MutableStateFlow(false)
     val isTestingConnection: StateFlow<Boolean> = _isTestingConnection.asStateFlow()
@@ -108,6 +145,9 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     init {
         initVoiceEngine()
         refreshBattery()
+        if (preferencesManager.isForegroundServiceEnabled()) {
+            JarvisVoiceForegroundService.start(getApplication<Application>().applicationContext)
+        }
     }
 
     private fun initVoiceEngine() {
@@ -117,6 +157,34 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                 processUserCommand(text, wasVoice = true)
             }
         )
+        voiceEngine.setVoiceProfile(preferencesManager.getVoiceProfile())
+    }
+
+    fun setVoiceProfile(profile: String) {
+        preferencesManager.saveVoiceProfile(profile)
+        voiceEngine.setVoiceProfile(profile)
+        val profileName = if (profile == "FEMALE") "Natural Female" else "Futuristic Cinematic"
+        _systemStatusText.value = "VOICE PROFILE: $profileName"
+        voiceEngine.speak("Voice synthesized to $profileName JARVIS mode.")
+    }
+
+    fun setWakeScreenEnabled(enabled: Boolean) {
+        preferencesManager.setWakeScreenEnabled(enabled)
+        _systemStatusText.value = if (enabled) "SCREEN WAKE-UP ENABLED" else "SCREEN WAKE-UP DISABLED"
+    }
+
+    fun setForegroundServiceEnabled(enabled: Boolean) {
+        preferencesManager.setForegroundServiceEnabled(enabled)
+        val ctx = getApplication<Application>().applicationContext
+        if (enabled) {
+            JarvisVoiceForegroundService.start(ctx)
+            _systemStatusText.value = "BACKGROUND VOICE ACTIVE"
+            voiceEngine.speak("Background voice service online.")
+        } else {
+            JarvisVoiceForegroundService.stop(ctx)
+            _systemStatusText.value = "BACKGROUND VOICE PAUSED"
+            voiceEngine.speak("Background voice service stopped.")
+        }
     }
 
     fun setTab(tab: JarvisTab) {
@@ -192,6 +260,17 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
         if (input.isEmpty()) return
 
         viewModelScope.launch {
+            // Screen Wake-Up: Wake screen on voice commands if enabled
+            if (preferencesManager.isWakeScreenEnabled()) {
+                JarvisVoiceForegroundService.wakeScreen(getApplication<Application>().applicationContext)
+                currentActivity?.let { act ->
+                    val km = act.getSystemService(android.content.Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        km?.requestDismissKeyguard(act, null)
+                    }
+                }
+            }
+
             voiceEngine.setVoiceState(JarvisVoiceState.PROCESSING)
 
             // Save user chat record
@@ -201,6 +280,117 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                     content = input
                 )
             )
+
+            // 1. Check if user is in an active WhatsApp multi-turn voice dialog
+            val currentDraft = _whatsAppDraftState.value
+            when (currentDraft) {
+                is WhatsAppDraftState.DisambiguatingContact -> {
+                    val lower = input.lowercase()
+                    if (lower in listOf("cancel", "cancel karo", "stop", "no", "nahi", "mat bhejo")) {
+                        _whatsAppDraftState.value = WhatsAppDraftState.Idle
+                        _pendingConfirmation.value = null
+                        recordAndRespond("CANCEL_ACTION", input, "CANCELLED", "WhatsApp message cancelled, sir.", wasVoice)
+                        return@launch
+                    }
+                    val chosen = currentDraft.candidateContacts.firstOrNull { contact ->
+                        lower.contains(contact.name.lowercase()) ||
+                                contact.name.lowercase().contains(lower)
+                    } ?: if (lower.contains("first") || lower.contains("pehla") || lower == "1") {
+                        currentDraft.candidateContacts.firstOrNull()
+                    } else if (lower.contains("second") || lower.contains("doosra") || lower == "2") {
+                        currentDraft.candidateContacts.getOrNull(1)
+                    } else null
+
+                    if (chosen != null) {
+                        _pendingConfirmation.value = null
+                        if (currentDraft.pendingMessage.isNullOrBlank()) {
+                            _whatsAppDraftState.value = WhatsAppDraftState.AwaitingMessage(chosen.name, chosen.phoneNumber, currentDraft.originalInput)
+                            recordAndRespond("WHATSAPP_AWAITING_MESSAGE", input, "IN_PROGRESS", "What message would you like to send?", wasVoice)
+                        } else {
+                            _whatsAppDraftState.value = WhatsAppDraftState.AwaitingConfirmation(chosen.name, chosen.phoneNumber, currentDraft.pendingMessage, currentDraft.originalInput)
+                            showWhatsAppConfirmationUI(chosen.name, chosen.phoneNumber, currentDraft.pendingMessage, currentDraft.originalInput, wasVoice)
+                        }
+                        return@launch
+                    } else {
+                        val names = currentDraft.candidateContacts.take(3).joinToString(" or ") { it.name }
+                        voiceEngine.speak("Please say which contact you mean: $names.")
+                        return@launch
+                    }
+                }
+
+                is WhatsAppDraftState.AwaitingMessage -> {
+                    val lower = input.lowercase()
+                    if (lower in listOf("cancel", "cancel karo", "stop", "no", "nahi", "mat bhejo")) {
+                        _whatsAppDraftState.value = WhatsAppDraftState.Idle
+                        _pendingConfirmation.value = null
+                        recordAndRespond("CANCEL_ACTION", input, "CANCELLED", "WhatsApp message cancelled, sir.", wasVoice)
+                        return@launch
+                    }
+                    // Strip leading prefixes like "Tell him", "Tell her", "Say that", "Bol do", "Message is", etc.
+                    val cleaned = input
+                        .replace("^(?i)(?:tell (?:him|her|them)|saying|say that|say|message is|ki|bol do|bata do)[,\\s]*".toRegex(), "")
+                        .trim()
+                    val finalMsg = if (cleaned.isNotBlank()) cleaned else input
+
+                    _whatsAppDraftState.value = WhatsAppDraftState.AwaitingConfirmation(
+                        recipientName = currentDraft.recipientName,
+                        recipientNumber = currentDraft.recipientNumber,
+                        message = finalMsg,
+                        originalInput = currentDraft.originalInput
+                    )
+                    showWhatsAppConfirmationUI(currentDraft.recipientName, currentDraft.recipientNumber, finalMsg, currentDraft.originalInput, wasVoice)
+                    return@launch
+                }
+
+                is WhatsAppDraftState.AwaitingConfirmation -> {
+                    val lower = input.lowercase()
+                    val isConfirmed = lower in listOf("yes", "send it", "send", "haan", "bhejo", "bhej do", "sure", "confirm", "proceed", "okay send", "yes send") ||
+                            lower.startsWith("yes") || lower.startsWith("send") || lower.startsWith("haan") || lower.startsWith("bhej")
+
+                    val isCancelled = lower in listOf("no", "cancel", "don't send", "mat bhejo", "cancel karo", "stop", "nahi") ||
+                            lower.startsWith("no") || lower.startsWith("cancel") || lower.startsWith("mat")
+
+                    if (isConfirmed) {
+                        _whatsAppDraftState.value = WhatsAppDraftState.Idle
+                        _pendingConfirmation.value = null
+                        val res = deviceController.prepareWhatsApp(currentDraft.recipientNumber, currentDraft.message)
+                        val reply = if (res.isSuccess) {
+                            "Opening WhatsApp chat. Please tap send to deliver your message."
+                        } else {
+                            res.exceptionOrNull()?.message ?: "Failed to open WhatsApp."
+                        }
+                        recordAndRespond("OPEN_WHATSAPP_CHAT", currentDraft.originalInput, if (res.isSuccess) "SUCCESS" else "FAILED", reply, wasVoice)
+                        return@launch
+                    } else if (isCancelled) {
+                        _whatsAppDraftState.value = WhatsAppDraftState.Idle
+                        _pendingConfirmation.value = null
+                        recordAndRespond("CANCEL_ACTION", currentDraft.originalInput, "CANCELLED", "WhatsApp message cancelled, sir.", wasVoice)
+                        return@launch
+                    } else {
+                        voiceEngine.speak("Shall I send this message to ${currentDraft.recipientName}? Please say 'yes, send it' or 'cancel'.")
+                        return@launch
+                    }
+                }
+
+                WhatsAppDraftState.Idle -> { /* proceed */ }
+            }
+
+            // 2. Check if a general pending confirmation (call / SMS) is awaiting user reply
+            val pending = _pendingConfirmation.value
+            if (pending != null) {
+                val lower = input.lowercase()
+                val isConfirmed = lower in listOf("yes", "call", "send", "haan", "sure", "confirm", "proceed", "yes please", "call karo") ||
+                        lower.startsWith("yes") || lower.startsWith("haan")
+                val isCancelled = lower in listOf("no", "cancel", "cancel karo", "stop", "nahi", "mat karo") ||
+                        lower.startsWith("no") || lower.startsWith("cancel")
+                if (isConfirmed) {
+                    pending.onConfirm()
+                    return@launch
+                } else if (isCancelled) {
+                    pending.onCancel()
+                    return@launch
+                }
+            }
 
             val parsed = CommandRouter.parse(input)
 
@@ -588,6 +778,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
         val contacts = deviceController.searchContacts(recipient)
 
         if (contacts.size > 1) {
+            _whatsAppDraftState.value = WhatsAppDraftState.DisambiguatingContact(contacts, message.ifBlank { null }, originalInput)
             // Disambiguation
             _pendingConfirmation.value = PendingActionConfirmation(
                 title = "SELECT WHATSAPP CONTACT",
@@ -597,26 +788,41 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                 multipleContacts = contacts,
                 onSelectContact = { chosen ->
                     _pendingConfirmation.value = null
-                    showWhatsAppDraftDialog(chosen.name, chosen.phoneNumber, message, originalInput, wasVoice)
+                    if (message.isBlank()) {
+                        _whatsAppDraftState.value = WhatsAppDraftState.AwaitingMessage(chosen.name, chosen.phoneNumber, originalInput)
+                        voiceEngine.speak("What message would you like to send to ${chosen.name}?")
+                    } else {
+                        _whatsAppDraftState.value = WhatsAppDraftState.AwaitingConfirmation(chosen.name, chosen.phoneNumber, message, originalInput)
+                        showWhatsAppConfirmationUI(chosen.name, chosen.phoneNumber, message, originalInput, wasVoice)
+                    }
                 },
                 onConfirm = {},
                 onCancel = {
                     _pendingConfirmation.value = null
+                    _whatsAppDraftState.value = WhatsAppDraftState.Idle
                     viewModelScope.launch {
                         recordAndRespond("CANCEL_ACTION", originalInput, "CANCELLED", "WhatsApp message cancelled.", wasVoice)
                     }
                 }
             )
-            voiceEngine.speak("Multiple contacts found for $recipient. Please select one.")
+            val names = contacts.take(3).joinToString(" or ") { it.name }
+            voiceEngine.speak("I found multiple contacts for $recipient: $names. Which one would you like to message?")
         } else {
             val contact = contacts.firstOrNull()
             val finalName = contact?.name ?: recipient
             val finalNumber = contact?.phoneNumber ?: recipient
-            showWhatsAppDraftDialog(finalName, finalNumber, message, originalInput, wasVoice)
+
+            if (message.isBlank()) {
+                _whatsAppDraftState.value = WhatsAppDraftState.AwaitingMessage(finalName, finalNumber, originalInput)
+                recordAndRespond("WHATSAPP_AWAITING_MESSAGE", originalInput, "IN_PROGRESS", "What message would you like to send?", wasVoice)
+            } else {
+                _whatsAppDraftState.value = WhatsAppDraftState.AwaitingConfirmation(finalName, finalNumber, message, originalInput)
+                showWhatsAppConfirmationUI(finalName, finalNumber, message, originalInput, wasVoice)
+            }
         }
     }
 
-    private fun showWhatsAppDraftDialog(
+    private fun showWhatsAppConfirmationUI(
         name: String,
         number: String,
         initialMessage: String,
@@ -627,19 +833,25 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
         _pendingConfirmation.value = PendingActionConfirmation(
             title = "CONFIRM WHATSAPP MESSAGE",
             description = "Recipient: $name ($number)",
-            details = if (currentMsg.isNotBlank()) "Draft: \"$currentMsg\"" else "Open conversation without prefill",
+            details = if (currentMsg.isNotBlank()) "Draft: \"$currentMsg\"" else "Open conversation",
             actionCategory = "DRAFT_WHATSAPP",
             editableMessage = currentMsg,
             onMessageChange = { updated ->
                 currentMsg = updated
+                _whatsAppDraftState.value = WhatsAppDraftState.AwaitingConfirmation(name, number, updated, originalInput)
             },
             onReadAloud = {
                 voiceEngine.speak(if (currentMsg.isNotBlank()) "Message to $name says: $currentMsg" else "No message drafted for $name.")
             },
             onConfirm = {
                 _pendingConfirmation.value = null
+                _whatsAppDraftState.value = WhatsAppDraftState.Idle
                 val res = deviceController.prepareWhatsApp(number, currentMsg)
-                val reply = res.getOrElse { "Failed to launch WhatsApp: ${it.message}" }
+                val reply = if (res.isSuccess) {
+                    "Opening WhatsApp chat. Please tap send to deliver your message."
+                } else {
+                    res.exceptionOrNull()?.message ?: "Failed to open WhatsApp."
+                }
                 viewModelScope.launch {
                     recordAndRespond(
                         category = "OPEN_WHATSAPP_CHAT",
@@ -652,6 +864,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
             },
             onCancel = {
                 _pendingConfirmation.value = null
+                _whatsAppDraftState.value = WhatsAppDraftState.Idle
                 viewModelScope.launch {
                     recordAndRespond(
                         category = "CANCEL_ACTION",
@@ -664,9 +877,9 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
             }
         )
         val promptSpeech = if (initialMessage.isNotBlank()) {
-            "Ready to open WhatsApp chat with $name and message: $initialMessage. Please confirm."
+            "Send this message to $name: '$initialMessage'. Shall I send it?"
         } else {
-            "Ready to open WhatsApp chat with $name. Please confirm."
+            "Ready to open WhatsApp chat with $name. Shall I proceed?"
         }
         voiceEngine.speak(promptSpeech)
     }

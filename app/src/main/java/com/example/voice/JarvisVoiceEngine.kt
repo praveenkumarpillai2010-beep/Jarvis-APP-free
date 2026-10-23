@@ -53,8 +53,11 @@ class JarvisVoiceEngine(
     private val _selectedLanguage = MutableStateFlow("en-IN") // en-IN, hi-IN, en-US
     val selectedLanguage: StateFlow<String> = _selectedLanguage.asStateFlow()
 
+    private val _voiceProfile = MutableStateFlow("FEMALE") // FEMALE or CINEMATIC
+    val voiceProfile: StateFlow<String> = _voiceProfile.asStateFlow()
+
     private var speechRate: Float = 1.0f
-    private var speechPitch: Float = 0.95f // Slightly deeper, cinematic JARVIS tone
+    private var speechPitch: Float = 1.15f // Natural crisp female pitch by default
 
     private var consecutiveErrors = 0
     private var isTtsInitialized = false
@@ -106,10 +109,23 @@ class JarvisVoiceEngine(
                     }
                 }
             })
-            Log.d(tag, "TextToSpeech initialized successfully.")
+            Log.d(tag, "TextToSpeech initialized successfully with natural female profile.")
         } else {
             Log.e(tag, "Failed to initialize TextToSpeech: status $status")
         }
+    }
+
+    fun setVoiceProfile(profile: String) {
+        _voiceProfile.value = profile
+        if (profile == "FEMALE") {
+            speechPitch = 1.15f
+            speechRate = 1.0f
+        } else {
+            // Futuristic cinematic male resonant tone
+            speechPitch = 0.92f
+            speechRate = 0.98f
+        }
+        applyVoiceSettings()
     }
 
     fun setSpeechSettings(rate: Float, pitch: Float) {
@@ -139,6 +155,39 @@ class JarvisVoiceEngine(
             val result = tts.setLanguage(locale)
             if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                 tts.setLanguage(Locale.US)
+            }
+
+            // If FEMALE voice profile is requested, select a female voice engine voice if available
+            try {
+                val voices = tts.voices
+                if (!voices.isNullOrEmpty()) {
+                    if (_voiceProfile.value == "FEMALE") {
+                        val targetLang = locale.language
+                        val matchedFemaleVoice = voices.firstOrNull { v ->
+                            v.locale.language.equals(targetLang, ignoreCase = true) &&
+                                    (v.name.contains("female", ignoreCase = true) ||
+                                            v.name.contains("#female", ignoreCase = true) ||
+                                            v.features?.any { it.contains("gender=female", ignoreCase = true) } == true)
+                        } ?: voices.firstOrNull { v ->
+                            v.name.contains("female", ignoreCase = true) ||
+                                    v.name.contains("#female", ignoreCase = true)
+                        }
+                        if (matchedFemaleVoice != null) {
+                            tts.voice = matchedFemaleVoice
+                        }
+                    } else {
+                        // Cinematic male voice
+                        val matchedMaleVoice = voices.firstOrNull { v ->
+                            v.locale.language.equals(locale.language, ignoreCase = true) &&
+                                    (v.name.contains("male", ignoreCase = true) && !v.name.contains("female", ignoreCase = true))
+                        }
+                        if (matchedMaleVoice != null) {
+                            tts.voice = matchedMaleVoice
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(tag, "Could not filter voice engine list", e)
             }
         }
     }

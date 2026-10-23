@@ -64,6 +64,18 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Configure lock-screen and screen turn-on behavior
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                        android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            )
+        }
+
         setContent {
             MyApplicationTheme {
                 val jarvisViewModel: JarvisViewModel = viewModel()
@@ -90,6 +102,7 @@ fun JarvisApp(
 
     // Auto-launch listening on startup as requested by the prompt!
     LaunchedEffect(Unit) {
+        viewModel.attachActivity(activity)
         viewModel.attachWindow(activity.window)
         val hasMic = activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         if (hasMic) {

@@ -94,6 +94,46 @@ class JarvisPreferencesManager(context: Context) {
         return prefs.getString(keyConnectionError, "") ?: ""
     }
 
+    private val keyVoiceProfile = "jarvis_voice_profile"
+    private val keyWakeScreenEnabled = "jarvis_wake_screen_enabled"
+    private val keyForegroundServiceEnabled = "jarvis_foreground_service_enabled"
+
+    private val _voiceProfileFlow = MutableStateFlow(getVoiceProfile())
+    val voiceProfileFlow: StateFlow<String> = _voiceProfileFlow.asStateFlow()
+
+    private val _wakeScreenEnabledFlow = MutableStateFlow(isWakeScreenEnabled())
+    val wakeScreenEnabledFlow: StateFlow<Boolean> = _wakeScreenEnabledFlow.asStateFlow()
+
+    private val _foregroundServiceEnabledFlow = MutableStateFlow(isForegroundServiceEnabled())
+    val foregroundServiceEnabledFlow: StateFlow<Boolean> = _foregroundServiceEnabledFlow.asStateFlow()
+
+    fun getVoiceProfile(): String {
+        return prefs.getString(keyVoiceProfile, "FEMALE") ?: "FEMALE"
+    }
+
+    fun saveVoiceProfile(profile: String) {
+        prefs.edit().putString(keyVoiceProfile, profile).apply()
+        _voiceProfileFlow.value = profile
+    }
+
+    fun isWakeScreenEnabled(): Boolean {
+        return prefs.getBoolean(keyWakeScreenEnabled, true)
+    }
+
+    fun setWakeScreenEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(keyWakeScreenEnabled, enabled).apply()
+        _wakeScreenEnabledFlow.value = enabled
+    }
+
+    fun isForegroundServiceEnabled(): Boolean {
+        return prefs.getBoolean(keyForegroundServiceEnabled, false)
+    }
+
+    fun setForegroundServiceEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(keyForegroundServiceEnabled, enabled).apply()
+        _foregroundServiceEnabledFlow.value = enabled
+    }
+
     fun setConnectionStatus(status: GeminiConnectionStatus, errorMessage: String = "") {
         prefs.edit()
             .putString(keyConnectionStatus, status.name)
