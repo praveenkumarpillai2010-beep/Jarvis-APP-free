@@ -90,6 +90,7 @@ fun JarvisApp(
 
     // Auto-launch listening on startup as requested by the prompt!
     LaunchedEffect(Unit) {
+        viewModel.attachWindow(activity.window)
         val hasMic = activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         if (hasMic) {
             viewModel.onMicPermissionResult(true)

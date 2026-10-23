@@ -52,12 +52,32 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     private val tag = "JarvisViewModel"
 
     val deviceController = DeviceActionController(application.applicationContext)
-    val geminiService = GeminiService()
+    val preferencesManager = com.example.data.JarvisPreferencesManager(application.applicationContext)
+    val geminiService = GeminiService(preferencesManager)
     private val database = JarvisDatabase.getDatabase(application.applicationContext)
     private val dao = database.jarvisDao()
 
     lateinit var voiceEngine: JarvisVoiceEngine
         private set
+
+    var currentWindow: android.view.Window? = null
+        private set
+
+    fun attachWindow(window: android.view.Window?) {
+        currentWindow = window
+    }
+
+    // Gemini API settings flows
+    val apiKeyFlow: StateFlow<String> = preferencesManager.apiKeyFlow
+    val selectedModelFlow: StateFlow<String> = preferencesManager.selectedModelFlow
+    val connectionStatusFlow: StateFlow<com.example.data.GeminiConnectionStatus> = preferencesManager.connectionStatusFlow
+    val lastErrorMessageFlow: StateFlow<String> = preferencesManager.lastErrorMessageFlow
+
+    private val _isTestingConnection = MutableStateFlow(false)
+    val isTestingConnection: StateFlow<Boolean> = _isTestingConnection.asStateFlow()
+
+    private val _testConnectionResult = MutableStateFlow<String?>(null)
+    val testConnectionResult: StateFlow<String?> = _testConnectionResult.asStateFlow()
 
     val commandHistory: StateFlow<List<JarvisCommandEntity>> = dao.getAllCommands()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -129,6 +149,39 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun saveApiKey(key: String) {
+        preferencesManager.saveApiKey(key)
+        _systemStatusText.value = "GEMINI API KEY UPDATED"
+    }
+
+    fun clearApiKey() {
+        preferencesManager.clearApiKey()
+        _testConnectionResult.value = null
+        _systemStatusText.value = "GEMINI API KEY CLEARED"
+    }
+
+    fun setSelectedModel(model: String) {
+        preferencesManager.saveSelectedModel(model)
+    }
+
+    fun testGeminiConnection(keyOverride: String? = null, modelOverride: String? = null) {
+        viewModelScope.launch {
+            _isTestingConnection.value = true
+            _testConnectionResult.value = null
+            val res = geminiService.testConnection(keyOverride, modelOverride)
+            _isTestingConnection.value = false
+            if (res.isSuccess) {
+                val msg = res.getOrNull() ?: "Gemini neural link verified."
+                _testConnectionResult.value = msg
+                voiceEngine.speak("Gemini connection test passed. Neural link operational.")
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Connection test failed."
+                _testConnectionResult.value = "Error: $err"
+                voiceEngine.speak("Gemini connection test failed. Please verify your API key.")
+            }
+        }
+    }
+
     fun sendTextMessage(text: String) {
         if (text.isBlank()) return
         processUserCommand(text, wasVoice = false)
@@ -139,6 +192,8 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
         if (input.isEmpty()) return
 
         viewModelScope.launch {
+            voiceEngine.setVoiceState(JarvisVoiceState.PROCESSING)
+
             // Save user chat record
             dao.insertChatMessage(
                 JarvisChatMessageEntity(
@@ -148,7 +203,86 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
             )
 
             val parsed = CommandRouter.parse(input)
+
+            // If the local regex gave GeneralChat, check if Gemini NLU can map this natural language utterance into a device action
+            if (parsed is ParsedAction.GeneralChat && preferencesManager.getActiveApiKey().isNotBlank()) {
+                val interpRes = geminiService.interpretCommandWithGemini(
+                    utterance = input,
+                    conversationHistory = chatMessages.value.takeLast(6).map { it.role to it.content }
+                )
+                if (interpRes.isSuccess) {
+                    val interp = interpRes.getOrThrow()
+                    if (interp.actionType == "ACTION" && interp.actionCategory != null) {
+                        val mappedAction = mapGeminiActionToParsed(interp.actionCategory, interp.parameters, input)
+                        if (mappedAction != null) {
+                            executeAction(mappedAction, originalInput = input, wasVoice = wasVoice)
+                            return@launch
+                        }
+                    } else if (interp.actionType == "CHAT" || interp.actionType == "CLARIFY") {
+                        val reply = interp.spokenResponse.ifBlank { interp.detailedResponse }
+                        recordAndRespond(
+                            category = "GEMINI_NLU_CHAT",
+                            command = input,
+                            status = "SUCCESS",
+                            reply = reply,
+                            wasVoice = wasVoice
+                        )
+                        return@launch
+                    }
+                }
+            }
+
             executeAction(parsed, originalInput = input, wasVoice = wasVoice)
+        }
+    }
+
+    private fun mapGeminiActionToParsed(category: String, params: Map<String, String>, input: String): ParsedAction? {
+        return when (category.uppercase()) {
+            "FLASHLIGHT_ON" -> ParsedAction.FlashlightOn
+            "FLASHLIGHT_OFF" -> ParsedAction.FlashlightOff
+            "GET_BATTERY_STATUS" -> ParsedAction.BatteryStatus
+            "OPEN_APP" -> {
+                val app = params["target"] ?: params["appName"] ?: params["app"] ?: ""
+                if (app.isNotBlank()) ParsedAction.OpenApp(app) else null
+            }
+            "SEARCH_YOUTUBE" -> {
+                val query = params["query"] ?: input
+                val autoPlay = params["autoPlay"]?.toBoolean() ?: true
+                ParsedAction.SearchYouTube(query, autoPlay)
+            }
+            "CREATE_TIMER" -> {
+                val sec = params["seconds"]?.toIntOrNull() ?: 300
+                ParsedAction.CreateTimer(sec, "JARVIS Timer")
+            }
+            "CREATE_ALARM" -> {
+                val h = params["hour"]?.toIntOrNull() ?: 7
+                val m = params["minute"]?.toIntOrNull() ?: 0
+                ParsedAction.CreateAlarm(h, m, "JARVIS Alarm")
+            }
+            "CALL_CONTACT" -> {
+                val rec = params["recipient"] ?: params["name"] ?: ""
+                if (rec.isNotBlank()) ParsedAction.CallContact(rec) else null
+            }
+            "DRAFT_WHATSAPP" -> {
+                val rec = params["recipient"] ?: ""
+                val msg = params["message"] ?: ""
+                if (rec.isNotBlank()) ParsedAction.DraftWhatsApp(rec, msg) else null
+            }
+            "DRAFT_SMS" -> {
+                val rec = params["recipient"] ?: ""
+                val msg = params["message"] ?: ""
+                if (rec.isNotBlank()) ParsedAction.DraftSms(rec, msg) else null
+            }
+            "TAKE_SCREENSHOT" -> ParsedAction.TakeScreenshot
+            "START_NAVIGATION" -> {
+                val dest = params["destination"] ?: ""
+                if (dest.isNotBlank()) ParsedAction.StartNavigation(dest) else null
+            }
+            "OPEN_SYSTEM_SETTINGS" -> {
+                val setting = params["setting"] ?: "settings"
+                ParsedAction.OpenSetting(setting)
+            }
+            else -> null
         }
     }
 
@@ -323,6 +457,22 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                     reply = reply,
                     wasVoice = wasVoice
                 )
+            }
+
+            is ParsedAction.TakeScreenshot -> {
+                voiceEngine.setVoiceState(JarvisVoiceState.EXECUTING)
+                deviceController.takeScreenshot(currentWindow) { res ->
+                    val reply = res.getOrElse { "To capture external screens, please use your device's hardware shortcut: Power + Volume Down." }
+                    viewModelScope.launch {
+                        recordAndRespond(
+                            category = "TAKE_SCREENSHOT",
+                            command = originalInput,
+                            status = if (res.isSuccess) "SUCCESS" else "FAILED",
+                            reply = reply,
+                            wasVoice = wasVoice
+                        )
+                    }
+                }
             }
 
             is ParsedAction.GeneralChat -> {

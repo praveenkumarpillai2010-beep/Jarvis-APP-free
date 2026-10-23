@@ -17,6 +17,7 @@ sealed class ParsedAction {
     data object ReadNotifications : ParsedAction()
     data class SearchWeb(val query: String) : ParsedAction()
     data class AdjustVolume(val direction: Int) : ParsedAction()
+    data object TakeScreenshot : ParsedAction()
     data object CancelAction : ParsedAction()
     data class GeneralChat(val query: String) : ParsedAction()
 }
@@ -40,6 +41,14 @@ object CommandRouter {
         // Cancellation command
         if (text == "cancel the message" || text == "cancel message" || text == "cancel" || text == "cancel action" || text == "cancel karo") {
             return ParsedAction.CancelAction
+        }
+
+        // Screenshot command
+        if (text.contains("screenshot") || text.contains("screen shot") ||
+            text.contains("screen capture") || text.contains("capture screen") ||
+            text.contains("capture the screen") || text.contains("screen grab")
+        ) {
+            return ParsedAction.TakeScreenshot
         }
 
         // 1. Flashlight on

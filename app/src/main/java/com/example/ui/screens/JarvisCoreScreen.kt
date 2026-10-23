@@ -184,16 +184,18 @@ fun JarvisCoreScreen(
 
             // AI Status Banner
             val statusColor = when (voiceState) {
-                JarvisVoiceState.READY -> JarvisCyan
+                JarvisVoiceState.READY, JarvisVoiceState.IDLE -> JarvisCyan
                 JarvisVoiceState.LISTENING -> JarvisNeonGlow
-                JarvisVoiceState.THINKING -> JarvisWarning
+                JarvisVoiceState.THINKING, JarvisVoiceState.PROCESSING -> JarvisWarning
+                JarvisVoiceState.EXECUTING -> JarvisCyan
                 JarvisVoiceState.SPEAKING -> JarvisElectricBlue
                 JarvisVoiceState.ERROR -> JarvisError
             }
             val statusLabel = when (voiceState) {
-                JarvisVoiceState.READY -> "JARVIS READY // STANDBY"
+                JarvisVoiceState.READY, JarvisVoiceState.IDLE -> "JARVIS READY // STANDBY"
                 JarvisVoiceState.LISTENING -> "JARVIS IS LISTENING..."
-                JarvisVoiceState.THINKING -> "PROCESSING COMMAND..."
+                JarvisVoiceState.THINKING, JarvisVoiceState.PROCESSING -> "PROCESSING COMMAND..."
+                JarvisVoiceState.EXECUTING -> "EXECUTING ACTION..."
                 JarvisVoiceState.SPEAKING -> "JARVIS IS SPEAKING..."
                 JarvisVoiceState.ERROR -> "SYSTEM ERROR // TAP TO RETRY"
             }

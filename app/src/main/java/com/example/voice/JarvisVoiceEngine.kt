@@ -18,8 +18,11 @@ import java.util.Locale
 
 enum class JarvisVoiceState {
     READY,
+    IDLE,
     LISTENING,
+    PROCESSING,
     THINKING,
+    EXECUTING,
     SPEAKING,
     ERROR
 }
@@ -56,6 +59,7 @@ class JarvisVoiceEngine(
     private var consecutiveErrors = 0
     private var isTtsInitialized = false
     private var isDestroyed = false
+    private var isActivelyListening = false
 
     init {
         initTts()
@@ -78,13 +82,16 @@ class JarvisVoiceEngine(
                 override fun onDone(utteranceId: String?) {
                     mainHandler.post {
                         _voiceState.value = JarvisVoiceState.READY
-                        // Automatically resume listening after speaking if auto-listen is active!
+                        // Automatically resume listening silently after speaking if auto-listen is active
                         if (_isAutoListening.value && !isDestroyed) {
                             mainHandler.postDelayed({
-                                if (_voiceState.value != JarvisVoiceState.SPEAKING && !isDestroyed) {
+                                if (_voiceState.value != JarvisVoiceState.SPEAKING &&
+                                    _voiceState.value != JarvisVoiceState.EXECUTING &&
+                                    !isDestroyed
+                                ) {
                                     startListeningInternal()
                                 }
-                            }, 500L) // Brief pause to prevent echo
+                            }, 450L) // Safe buffer to prevent hearing own echo
                         }
                     }
                 }
@@ -114,6 +121,10 @@ class JarvisVoiceEngine(
     fun setLanguage(langCode: String) {
         _selectedLanguage.value = langCode
         applyVoiceSettings()
+    }
+
+    fun setVoiceState(state: JarvisVoiceState) {
+        _voiceState.value = state
     }
 
     private fun applyVoiceSettings() {
@@ -168,8 +179,7 @@ class JarvisVoiceEngine(
 
     fun startListening() {
         if (isDestroyed) return
-        // Do not interrupt while JARVIS is actively speaking
-        if (_voiceState.value == JarvisVoiceState.SPEAKING) {
+        if (_voiceState.value == JarvisVoiceState.SPEAKING || _voiceState.value == JarvisVoiceState.EXECUTING) {
             return
         }
         mainHandler.post {
@@ -184,10 +194,15 @@ class JarvisVoiceEngine(
             initSpeechRecognizer()
         }
 
+        val recognizer = speechRecognizer ?: return
+
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
 
             val lang = _selectedLanguage.value
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
@@ -197,11 +212,17 @@ class JarvisVoiceEngine(
         }
 
         try {
-            speechRecognizer?.startListening(intent)
+            // Cancel previous listening session cleanly without destroying the recognizer instance
+            if (isActivelyListening) {
+                recognizer.cancel()
+            }
+            recognizer.startListening(intent)
+            isActivelyListening = true
             _voiceState.value = JarvisVoiceState.LISTENING
             _liveTranscription.value = "Listening..."
         } catch (e: Exception) {
             Log.e(tag, "Failed to start listening", e)
+            isActivelyListening = false
             _voiceState.value = JarvisVoiceState.ERROR
             scheduleSafeRestart(1500L)
         }
@@ -209,6 +230,7 @@ class JarvisVoiceEngine(
 
     fun stopListening() {
         mainHandler.post {
+            isActivelyListening = false
             try {
                 speechRecognizer?.stopListening()
             } catch (e: Exception) {
@@ -229,7 +251,12 @@ class JarvisVoiceEngine(
 
         mainHandler.post {
             // Stop listening while speaking to avoid hearing own voice
-            stopListening()
+            try {
+                speechRecognizer?.cancel()
+            } catch (e: Exception) {
+                Log.w(tag, "Error cancelling recognizer before TTS", e)
+            }
+            isActivelyListening = false
             _voiceState.value = JarvisVoiceState.SPEAKING
 
             val utteranceId = "JARVIS_RESPONSE_${System.currentTimeMillis()}"
@@ -254,8 +281,12 @@ class JarvisVoiceEngine(
         if (!_isAutoListening.value || isDestroyed) return
         mainHandler.removeCallbacksAndMessages(null)
         mainHandler.postDelayed({
-            if (_isAutoListening.value && _voiceState.value != JarvisVoiceState.SPEAKING && !isDestroyed) {
-                initSpeechRecognizer()
+            if (_isAutoListening.value &&
+                _voiceState.value != JarvisVoiceState.SPEAKING &&
+                _voiceState.value != JarvisVoiceState.EXECUTING &&
+                !isDestroyed
+            ) {
+                // Reuse existing SpeechRecognizer to avoid system startup chime
                 startListeningInternal()
             }
         }, delayMs)
@@ -281,44 +312,50 @@ class JarvisVoiceEngine(
 
     override fun onEndOfSpeech() {
         _audioRmsDb.value = 0f
+        isActivelyListening = false
     }
 
     override fun onError(error: Int) {
         _audioRmsDb.value = 0f
+        isActivelyListening = false
         consecutiveErrors++
         Log.w(tag, "Speech recognition error code: $error, consecutive: $consecutiveErrors")
 
-        // Error codes:
-        // 6: ERROR_SPEECH_TIMEOUT, 7: ERROR_NO_MATCH, 8: ERROR_RECOGNIZER_BUSY
-        val delay = when {
-            consecutiveErrors > 5 -> 3000L // Back off if repeated silence/errors
-            error == SpeechRecognizer.ERROR_NO_MATCH -> 600L
-            error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 500L
-            else -> 1000L
+        // Recreate recognizer only if critical client failure occurs repeatedly
+        if (consecutiveErrors > 6 || error == SpeechRecognizer.ERROR_CLIENT) {
+            initSpeechRecognizer()
         }
 
-        if (_voiceState.value != JarvisVoiceState.SPEAKING) {
+        val delay = when {
+            consecutiveErrors > 5 -> 2500L
+            error == SpeechRecognizer.ERROR_NO_MATCH -> 400L
+            error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 350L
+            else -> 800L
+        }
+
+        if (_voiceState.value != JarvisVoiceState.SPEAKING && _voiceState.value != JarvisVoiceState.EXECUTING) {
             _voiceState.value = JarvisVoiceState.READY
         }
 
-        if (_isAutoListening.value && _voiceState.value != JarvisVoiceState.SPEAKING) {
+        if (_isAutoListening.value && _voiceState.value != JarvisVoiceState.SPEAKING && _voiceState.value != JarvisVoiceState.EXECUTING) {
             scheduleSafeRestart(delay)
         }
     }
 
     override fun onResults(results: Bundle?) {
         _audioRmsDb.value = 0f
+        isActivelyListening = false
         consecutiveErrors = 0
         val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
         val recognizedText = matches?.firstOrNull()?.trim() ?: ""
 
         if (recognizedText.isNotBlank()) {
             _liveTranscription.value = recognizedText
-            _voiceState.value = JarvisVoiceState.THINKING
+            _voiceState.value = JarvisVoiceState.PROCESSING
             onCommandRecognized(recognizedText)
         } else {
-            if (_isAutoListening.value) {
-                scheduleSafeRestart(400L)
+            if (_isAutoListening.value && _voiceState.value != JarvisVoiceState.SPEAKING) {
+                scheduleSafeRestart(300L)
             } else {
                 _voiceState.value = JarvisVoiceState.READY
             }
@@ -339,6 +376,7 @@ class JarvisVoiceEngine(
         isDestroyed = true
         mainHandler.removeCallbacksAndMessages(null)
         try {
+            speechRecognizer?.cancel()
             speechRecognizer?.destroy()
             speechRecognizer = null
         } catch (e: Exception) {

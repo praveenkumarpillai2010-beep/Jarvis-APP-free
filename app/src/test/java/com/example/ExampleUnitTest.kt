@@ -98,4 +98,20 @@ class ExampleUnitTest {
         assertEquals(6, (alarm as ParsedAction.CreateAlarm).hour)
         assertEquals(30, (alarm as ParsedAction.CreateAlarm).minute)
     }
+
+    @Test
+    fun testScreenshotCommands() {
+        val shot1 = CommandRouter.parse("take a screenshot")
+        assertTrue(shot1 is ParsedAction.TakeScreenshot)
+
+        val shot2 = CommandRouter.parse("screenshot lo")
+        assertTrue(shot2 is ParsedAction.TakeScreenshot)
+
+        val shot3 = CommandRouter.parse("capture screen")
+        assertTrue(shot3 is ParsedAction.TakeScreenshot)
+
+        val shot4 = CommandRouter.parse("hey jarvis, take screenshot")
+        assertTrue(shot4 is ParsedAction.TakeScreenshot)
+    }
 }
+

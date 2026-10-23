@@ -80,17 +80,19 @@ fun JarvisArcReactor(
     )
 
     val primaryColor = when (voiceState) {
-        JarvisVoiceState.READY -> JarvisCyan
+        JarvisVoiceState.READY, JarvisVoiceState.IDLE -> JarvisCyan
         JarvisVoiceState.LISTENING -> JarvisNeonGlow
-        JarvisVoiceState.THINKING -> JarvisWarning
+        JarvisVoiceState.THINKING, JarvisVoiceState.PROCESSING -> JarvisWarning
+        JarvisVoiceState.EXECUTING -> JarvisAqua
         JarvisVoiceState.SPEAKING -> JarvisElectricBlue
         JarvisVoiceState.ERROR -> JarvisError
     }
 
     val stateText = when (voiceState) {
-        JarvisVoiceState.READY -> "READY"
+        JarvisVoiceState.READY, JarvisVoiceState.IDLE -> "READY"
         JarvisVoiceState.LISTENING -> "LISTENING"
-        JarvisVoiceState.THINKING -> "THINKING"
+        JarvisVoiceState.THINKING, JarvisVoiceState.PROCESSING -> "PROCESSING"
+        JarvisVoiceState.EXECUTING -> "EXECUTING"
         JarvisVoiceState.SPEAKING -> "SPEAKING"
         JarvisVoiceState.ERROR -> "OFFLINE"
     }

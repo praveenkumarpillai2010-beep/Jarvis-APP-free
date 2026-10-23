@@ -23,23 +23,33 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Emergency
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -53,8 +63,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.GeminiConnectionStatus
+import com.example.ui.theme.JarvisAqua
 import com.example.ui.theme.JarvisBackground
 import com.example.ui.theme.JarvisBorder
 import com.example.ui.theme.JarvisCyan
@@ -78,6 +92,22 @@ fun SettingsAndPermissionsScreen(
     val context = LocalContext.current
     val voiceEngine = viewModel.voiceEngine
     val selectedLang by voiceEngine.selectedLanguage.collectAsState()
+
+    val savedApiKey by viewModel.apiKeyFlow.collectAsState()
+    val selectedGeminiModel by viewModel.selectedModelFlow.collectAsState()
+    val geminiConnStatus by viewModel.connectionStatusFlow.collectAsState()
+    val lastConnError by viewModel.lastErrorMessageFlow.collectAsState()
+    val isTestingConn by viewModel.isTestingConnection.collectAsState()
+    val testConnResult by viewModel.testConnectionResult.collectAsState()
+
+    var apiKeyInput by remember { mutableStateOf(savedApiKey) }
+    var isKeyVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(savedApiKey) {
+        if (apiKeyInput.isEmpty() && savedApiKey.isNotEmpty()) {
+            apiKeyInput = savedApiKey
+        }
+    }
 
     var speechRate by remember { mutableFloatStateOf(1.0f) }
     var speechPitch by remember { mutableFloatStateOf(0.95f) }
@@ -158,6 +188,7 @@ fun SettingsAndPermissionsScreen(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                // App info setting shortcut
                 OutlinedButton(
                     onClick = {
                         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
@@ -170,16 +201,16 @@ fun SettingsAndPermissionsScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, JarvisBorder),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.OpenInNew, contentDescription = "App Settings", tint = JarvisCyan, modifier = Modifier.size(16.dp))
+                    Icon(imageVector = Icons.Default.OpenInNew, contentDescription = "Open Settings", tint = JarvisTextSecondary, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("OPEN ANDROID APP PERMISSION SETTINGS", color = JarvisCyan, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text("MANAGE IN ANDROID SYSTEM SETTINGS", color = JarvisTextSecondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 2. Voice & Language Tuning Card
+        // 2. Speech Synthesis & Recognition Language Tuning
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -197,7 +228,7 @@ fun SettingsAndPermissionsScreen(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "VOICE ENGINE & SPEECH CONFIGURATION",
+                        text = "VOICE ENGINE & SYNTHESIS CALIBRATION",
                         color = JarvisTextPrimary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
@@ -207,31 +238,21 @@ fun SettingsAndPermissionsScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Language selection
-                Text(
-                    text = "RECOGNITION & SYNTHESIS LANGUAGE:",
-                    color = JarvisTextMuted,
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-
+                // Language Selector
+                Text("Recognition & Output Language", color = JarvisTextSecondary, fontSize = 12.sp)
                 Spacer(modifier = Modifier.height(6.dp))
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf(
-                        "English (India)" to "en-IN",
-                        "Hindi (हिन्दी)" to "hi-IN",
-                        "English (US)" to "en-US"
-                    ).forEach { (label, code) ->
+                    val langs = listOf("en-IN" to "English (India)", "hi-IN" to "Hindi (हिन्दी)", "en-US" to "English (US)")
+                    langs.forEach { (code, label) ->
                         val isSelected = selectedLang == code
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .background(
-                                    if (isSelected) JarvisCyan.copy(alpha = 0.2f) else JarvisSurface,
+                                    if (isSelected) JarvisCyan.copy(alpha = 0.25f) else JarvisSurface,
                                     RoundedCornerShape(8.dp)
                                 )
                                 .border(
@@ -240,13 +261,14 @@ fun SettingsAndPermissionsScreen(
                                     RoundedCornerShape(8.dp)
                                 )
                                 .clickable { voiceEngine.setLanguage(code) }
-                                .padding(vertical = 8.dp),
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = label,
                                 color = if (isSelected) JarvisCyan else JarvisTextSecondary,
                                 fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 maxLines = 1
                             )
@@ -319,41 +341,253 @@ fun SettingsAndPermissionsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 3. Gemini AI Brain Status Card
+        // 3. Gemini AI Neural Core Configuration Card
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(JarvisDeepNavy, RoundedCornerShape(12.dp))
-                .border(1.dp, JarvisBorder, RoundedCornerShape(12.dp))
+                .border(1.dp, JarvisCyan.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                 .padding(14.dp)
         ) {
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.CloudDone,
-                        contentDescription = "Cloud AI",
-                        tint = JarvisCyan,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "GEMINI AI ARCHITECTURE",
-                        color = JarvisTextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.CloudDone,
+                            contentDescription = "Cloud AI",
+                            tint = JarvisCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "GEMINI AI NEURAL CORE",
+                            color = JarvisTextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // Status Pill
+                    val (statusBg, statusText, statusTextColor) = when (geminiConnStatus) {
+                        GeminiConnectionStatus.CONNECTED -> Triple(JarvisSuccess.copy(alpha = 0.2f), "CONNECTED", JarvisSuccess)
+                        GeminiConnectionStatus.INVALID_KEY -> Triple(JarvisError.copy(alpha = 0.2f), "INVALID KEY", JarvisError)
+                        GeminiConnectionStatus.QUOTA_EXCEEDED -> Triple(JarvisWarning.copy(alpha = 0.2f), "QUOTA LIMIT", JarvisWarning)
+                        GeminiConnectionStatus.NETWORK_ERROR -> Triple(JarvisWarning.copy(alpha = 0.2f), "NET ERROR", JarvisWarning)
+                        GeminiConnectionStatus.NOT_CONFIGURED -> Triple(JarvisSurface, "NOT CONFIGURED", JarvisTextMuted)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .background(statusBg, RoundedCornerShape(12.dp))
+                            .border(1.dp, statusTextColor.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = statusText,
+                            color = statusTextColor,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
+                // Model Selection Chips
                 Text(
-                    text = "Model: gemini-3.5-flash (Google DeepMind)\nProtocol: Direct REST HTTPS Engine\nSecrets: Configured via AI Studio Secrets Panel\nFallback: Dual-layer offline regex parser for instant phone actions",
+                    text = "SELECT REASONING ENGINE MODEL:",
                     color = JarvisTextSecondary,
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp,
+                    fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("gemini-3.5-flash", "gemini-3.1-pro-preview").forEach { modelOption ->
+                        val isSelected = selectedGeminiModel == modelOption
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(
+                                    if (isSelected) JarvisCyan.copy(alpha = 0.2f) else JarvisSurface,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) JarvisCyan else JarvisBorder,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable {
+                                    viewModel.setSelectedModel(modelOption)
+                                }
+                                .padding(vertical = 8.dp, horizontal = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = modelOption,
+                                color = if (isSelected) JarvisCyan else JarvisTextSecondary,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // API Key Input with Visibility Toggle
+                Text(
+                    text = "GEMINI API KEY (STORED LOCALLY & ENCRYPTED):",
+                    color = JarvisTextSecondary,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                OutlinedTextField(
+                    value = apiKeyInput,
+                    onValueChange = { apiKeyInput = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("gemini_api_key_input"),
+                    placeholder = {
+                        Text("Enter your AI Studio API Key (AIzaSy...)", color = JarvisTextMuted, fontSize = 11.sp)
+                    },
+                    visualTransformation = if (isKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { isKeyVisible = !isKeyVisible }) {
+                            Icon(
+                                imageVector = if (isKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (isKeyVisible) "Hide API Key" else "Show API Key",
+                                tint = JarvisCyan
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = JarvisTextPrimary,
+                        unfocusedTextColor = JarvisTextPrimary,
+                        focusedBorderColor = JarvisCyan,
+                        unfocusedBorderColor = JarvisBorder,
+                        focusedContainerColor = JarvisSurface,
+                        unfocusedContainerColor = JarvisSurface,
+                        cursorColor = JarvisCyan
+                    ),
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Action Buttons: Save, Test, Clear
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            viewModel.saveApiKey(apiKeyInput)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("save_api_key_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = JarvisCyan,
+                            contentColor = Color(0xFF001E2E)
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Check, contentDescription = "Save", modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("SAVE", fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.testGeminiConnection(apiKeyInput.ifBlank { null })
+                        },
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .testTag("test_api_key_button"),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, JarvisElectricBlue),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = JarvisElectricBlue),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)
+                    ) {
+                        if (isTestingConn) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(12.dp),
+                                color = JarvisCyan,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(imageVector = Icons.Default.Refresh, contentDescription = "Test", modifier = Modifier.size(14.dp))
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("TEST PING", fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            apiKeyInput = ""
+                            viewModel.clearApiKey()
+                        },
+                        modifier = Modifier
+                            .weight(0.9f)
+                            .testTag("clear_api_key_button"),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, JarvisError.copy(alpha = 0.6f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = JarvisError),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Delete, contentDescription = "Clear", modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("CLEAR", fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    }
+                }
+
+                // Test output / Error diagnostic banner
+                if (testConnResult != null || lastConnError.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    val bannerText = testConnResult ?: lastConnError
+                    val isSuccess = testConnResult?.startsWith("Connection successful") == true || testConnResult?.contains("operational") == true || testConnResult?.contains("verified") == true
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (isSuccess) JarvisSuccess.copy(alpha = 0.15f) else JarvisError.copy(alpha = 0.15f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .border(
+                                1.dp,
+                                if (isSuccess) JarvisSuccess.copy(alpha = 0.5f) else JarvisError.copy(alpha = 0.5f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(10.dp)
+                    ) {
+                        Text(
+                            text = bannerText,
+                            color = if (isSuccess) JarvisSuccess else JarvisError,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
             }
         }
 
@@ -391,7 +625,9 @@ fun SettingsAndPermissionsScreen(
                     onClick = {
                         val battery = viewModel.deviceController.getBatteryStatus()
                         val torchRes = viewModel.deviceController.toggleFlashlight(false)
-                        diagnosticResult = "✓ Voice Engine: Active\n✓ Battery: ${battery.percentage}%\n✓ Torch Hardware: ${if (torchRes.isSuccess) "Operational" else "Checked"}\n✓ Storage Dao: Connected"
+                        val activeKey = viewModel.preferencesManager.getActiveApiKey()
+                        val keyStatus = if (activeKey.isNotBlank()) "Configured (${activeKey.take(4)}...)" else "Offline"
+                        diagnosticResult = "✓ Voice Engine: Active\n✓ Battery: ${battery.percentage}%\n✓ Torch Hardware: ${if (torchRes.isSuccess) "Operational" else "Checked"}\n✓ Gemini Neural Link: $keyStatus\n✓ Storage Dao: Connected"
                         voiceEngine.speak("System diagnostics completed. All subroutines report normal status.")
                     },
                     modifier = Modifier
